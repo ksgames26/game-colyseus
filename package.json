@@ -1,0 +1,30 @@
+{
+    "$schema": "./@types/schema/package/index.json",
+    "package_version": 2,
+    "name": "game-colyseus",
+    "version": "1.0.0",
+    "author": "Cocos Creator",
+    "editor": ">=3.8.4",
+    "scripts": {
+        "build": "tsc",
+        "watch": "tsc -w"
+    },
+    "description": "i18n:game-colyseus.description",
+    "main": "./dist/main.js",
+    "devDependencies": {
+        "@cocos/creator-types": "^3.8.4",
+        "@types/node": "^18.17.1",
+        "typescript": "^4.3.4"
+    },
+    "contributions": {
+        "asset-db": {
+            "mount": {
+                "path": "./game-framework",
+                "readonly": true
+            }
+        }
+    },
+    "dependencies": {
+        "colyseus.js": "^0.15.26"
+    }
+}

@@ -1,0 +1,15 @@
+{
+    "extends": "./base.tsconfig.json",
+    "compilerOptions": {
+        "outDir": "./dist",
+        "rootDir": "./source",
+        "types": [
+            "node",
+            "@cocos/creator-types/editor",
+        ],
+        "paths": {
+            "colyseus": ["../node_modules/colyseus.js/dist/colyseus-cocos-creator.js"]
+        }
+    },
+    "exclude": ["./game-framework"],
+}
