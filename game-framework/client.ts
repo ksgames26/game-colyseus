@@ -1,7 +1,7 @@
 import { assert } from "cc";
 import { DEBUG } from "cc/env";
 import type * as Colyseus from "colyseus.js";
-import { Container, logger, makeDefered } from "db://game-core/game-framework";
+import { C2S_MESSAGE, Container, logger, makeDefered } from "db://game-core/game-framework";
 import { EventDispatcher, TaskService } from "db://game-framework/game-framework";
 import { MessageType } from "db://game-protobuf/game-framework";
 import { colyseus, EventOverview, S2C_Replay } from "./colyseus";
@@ -103,7 +103,7 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
         }
     }
 
-    public async rpcResMessage<R extends object>(roomName: string, reqUniqueId: number, data: ArrayBuffer, r: MessageType<R>, type: string = ""): Promise<IGameFramework.Nullable<R>> {
+    public async rpcResMessage<R extends object>(roomName: string, reqUniqueId: number, data: ArrayBuffer, r: MessageType<R>, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
         if (this._disposed) return null;
 
         const room = this._rooms.get(roomName);
