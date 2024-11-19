@@ -1,7 +1,6 @@
 //@ts-ignore 
 import ColyseusImpl from "../node_modules/colyseus.js/dist/colyseus-cocos-creator.js";
 import { Room } from "./room.js";
-type Colyseus = typeof import("colyseus.js");
 const colyseus: typeof import("colyseus.js") = ColyseusImpl;
 
 export interface S2C_Replay {
@@ -9,6 +8,10 @@ export interface S2C_Replay {
      * 响应唯一ID，与请求对应
      */
     resUniqueId: number;
+     /**
+     * 响应ID
+     */
+     resBodyId: number;
     /**
      * 响应内容
      */

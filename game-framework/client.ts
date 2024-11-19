@@ -1,10 +1,9 @@
 import { assert } from "cc";
 import { DEBUG } from "cc/env";
 import type * as Colyseus from "colyseus.js";
-import { C2S_MESSAGE, Container, logger, makeDefered } from "db://game-core/game-framework";
+import { C2S_MESSAGE, Container, logger } from "db://game-core/game-framework";
 import { EventDispatcher, TaskService } from "db://game-framework/game-framework";
-import { MessageType } from "db://game-protobuf/game-framework";
-import { colyseus, EventOverview, S2C_Replay } from "./colyseus";
+import { colyseus, EventOverview } from "./colyseus";
 import { Room } from "./room";
 
 export interface IPlayer {
@@ -89,7 +88,7 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
         return false;
     }
 
-    public request(roomName: string, data: ArrayBuffer, type: string = ""): void {
+    public request(roomName: string, data: ArrayBuffer, type: string = C2S_MESSAGE): void {
         if (this._disposed) return;
 
         const room = this._rooms.get(roomName);
@@ -98,12 +97,14 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
             return;
         }
 
-        if (room.inst.connection.isOpen) {
-            room.inst.send(type, data);
+        if (room.isOpen) {
+            room.send(type, data);
+        } else {
+            logger.warn(`room ${roomName} is not connected`);
         }
     }
 
-    public async rpcResMessage<R extends object>(roomName: string, reqUniqueId: number, data: ArrayBuffer, r: MessageType<R>, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
+    public async rpcResMessage<R extends object>(roomName: string, reqUniqueId: number, data: ArrayBuffer, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
         if (this._disposed) return null;
 
         const room = this._rooms.get(roomName);
@@ -112,25 +113,21 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
             return;
         }
 
-        if (room.inst.connection.isOpen) {
-            let { resolve, promise } = makeDefered<R>();
+        if (room.isOpen) {
+            room.send(type, data);
 
-            this.addListener(`$${reqUniqueId}`, (msg: {
-                room: Room,
-                message: S2C_Replay
-            }) => {
-                if (msg.message.resUniqueId === reqUniqueId) {
-                    if (msg.message.resCode == 0) {
-                        const reply = r.fromBinary(new Uint8Array(msg.message.resBody));
-                        resolve(reply);
-                    } else {
-                        logger.warn(`rpc error:${msg.message.resCode}`);
-                        resolve(null!);
-                    }
+            const msg = await this.addAsyncListener(`$${reqUniqueId}`);
+            if (msg.message.resUniqueId === reqUniqueId) {
+                if (msg.message.resCode == 0) {
+                    const decoder = Container.getInterface("IGameFramework.ISerializable")!;
+                    const data = decoder.decoder(msg.message.resBodyId, msg.message.resBody);
+                    return data as R;
+                } else {
+                    logger.warn(`rpc error:${msg.message.resCode}`);
                 }
-            }, this, 1);
-            room.inst.send(type, data);
-            return await promise;
+            }
+        } else {
+            logger.warn(`room ${roomName} is not connected`);
         }
     }
 
@@ -158,76 +155,4 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
             return await this._connect(count, room, joinData);
         }
     }
-
-    // public async login(openId: string): Promise<IGameFramework.Nullable<S2C_Replay>> {
-    //     this._loginClient = new colyseus.Client(`ws${this._useSSL ? "s" : ""}://${this._hostname}:${this._port}`);
-
-    //     try {
-    //         this._reqUniqueId++;
-
-    //         const req = C2S_Request.create({
-    //             reqUniqueId: this._reqUniqueId,
-    //             reqBody: C2S_ReqLogin.toBinary({
-    //                 openId
-    //             })
-    //         });
-
-    //         const room = this._loginRoom = await this._loginClient.joinOrCreate("login", req);
-
-    //         let _resolve: (reply: IGameFramework.Nullable<S2C_Replay>) => void;
-    //         let _promise = new Promise<IGameFramework.Nullable<S2C_Replay>>(resolve => _resolve = resolve);
-
-    //         room.onMessage("*", (t, m) => {
-    //             logger.log("login onMessage: *", t, m);
-    //         });
-
-    //         room.onError((code, message) => {
-    //             logger.warn("login error:", code, message);
-    //         });
-
-    //         room.onMessage("reqReply", (buffer) => {
-    //             const reply = S2C_Replay.fromBinary(new Uint8Array(buffer));
-
-    //             _resolve(reply);
-
-    //             // 退出房间后关闭连接
-    //             this._loginRoom.connection.close();
-    //         });
-
-    //         return await _promise;
-    //     } catch (e: any) {
-    //         logger.warn("login error: ", e.toString());
-    //         return;
-    //     }
-    // }
-
-    // public async joinOrCreateRoom(roomName: string, options: { mode: string, level: number }): Promise<void> {
-    //     this._pkRoom = await this._pkClient.joinOrCreate(roomName, options);
-    //     console.log("joinOrCreateRoom: ", this._pkRoom.roomId);
-    //     this.initialize();
-    // }
-
-    // private initialize(): void {
-    //     this._pkRoom.onStateChange((state) => {
-    //         console.log("onStateChange before ");
-
-    //         state.players.forEach((player) => {
-    //             console.log("player: ", player.id);
-    //         });
-
-    //         console.log("onStateChange after ");
-    //     });
-
-    //     this._pkRoom.onLeave((code) => {
-    //         console.log("onLeave:", code);
-    //     });
-
-    //     this._pkRoom.onMessage("*", (c) => {
-    //         console.log("onMessage: *", c);
-    //     });
-
-    //     this._pkRoom.onMessage("joinSuccess", (id) => {
-    //         console.log("joinSuccess", id);
-    //     });
-    // }
 }
