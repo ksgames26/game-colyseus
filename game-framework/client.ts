@@ -1,8 +1,8 @@
 import { assert } from "cc";
 import { DEBUG } from "cc/env";
 import type * as Colyseus from "colyseus.js";
-import { C2S_MESSAGE, Container, logger } from "db://game-core/game-framework";
-import { EventDispatcher, TaskService } from "db://game-framework/game-framework";
+import { C2S_MESSAGE, Container, logger, setTimeoutAsync } from "db://game-core/game-framework";
+import { EventDispatcher } from "db://game-framework/game-framework";
 import { colyseus, EventOverview } from "./colyseus";
 import { Room } from "./room";
 
@@ -76,13 +76,15 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
     }
 
     public async connect<T>(room: string, joinData: T): Promise<boolean> {
-        if (this._disposed) return false;
+        if (this._disposed || this._client) return false;
 
         this._client = new colyseus.Client(this._address);
         const inst = await this._connect(3, room, joinData);
         if (inst) {
             this._rooms.set(room, new Room(room, inst, this).listen());
             return true;
+        } else {
+            this._client = null!;
         }
 
         return false;
@@ -104,7 +106,17 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
         }
     }
 
-    public async rpcResMessage<R extends object>(roomName: string, reqUniqueId: number, data: ArrayBuffer, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
+    /**
+     * 发送消息,服务器不会1对1应答，但是可能会有其他消息推送
+     *
+     * @template R
+     * @param {string} roomName
+     * @param {ArrayBuffer} data
+     * @param {string} [type=C2S_MESSAGE]
+     * @return {*}  {Promise<IGameFramework.Nullable<R>>}
+     * @memberof ColyseusSdk
+     */
+    public async rpcHasPushMessage<R extends object>(roomName: string, data: ArrayBuffer, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
         if (this._disposed) return null;
 
         const room = this._rooms.get(roomName);
@@ -115,16 +127,54 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
 
         if (room.isOpen) {
             room.send(type, data);
+        } else {
+            logger.warn(`room ${roomName} is not connected`);
+        }
+    }
 
-            const msg = await this.addAsyncListener(`$${reqUniqueId}`);
-            if (msg.message.resUniqueId === reqUniqueId) {
-                if (msg.message.resCode == 0) {
-                    const decoder = Container.getInterface("IGameFramework.ISerializable")!;
-                    const data = decoder.decoder(msg.message.resBodyId, msg.message.resBody);
-                    return data as R;
-                } else {
-                    logger.warn(`rpc error:${msg.message.resCode}`);
+    /**
+     * 发送消息并等待服务器回复
+     *
+     * @template R
+     * @param {string} roomName
+     * @param {number} reqUniqueId
+     * @param {ArrayBuffer} data
+     * @param {number} [timeout=20_000]
+     * @param {string} [type=C2S_MESSAGE]
+     * @return {*}  {Promise<IGameFramework.Nullable<R>>}
+     * @memberof ColyseusSdk
+     */
+    public async rpcHasReplyMessage<R extends object>(roomName: string, reqUniqueId: number, data: ArrayBuffer, timeout: number = 20_000, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
+        if (this._disposed) return null;
+
+        const room = this._rooms.get(roomName);
+        if (!room) {
+            logger.warn(`room ${roomName} is not exist`);
+            return;
+        }
+
+        if (room.isOpen) {
+            room.send(type, data);
+            let timeId: NodeJS.Timeout = null!;
+            let timeoutPromise = new Promise<void>((resolve) => { timeId = setTimeout(resolve, timeout); });
+            const msg = await Promise.race([timeoutPromise, this.addAsyncListener(`$${reqUniqueId}`)]);
+
+            // 不管有没有收到服务器消息，都要清除定时器
+            timeId != null && clearTimeout(timeId);
+
+            if (msg) {
+                // 事件发送后会自动remove。所以这里不需要手动remove
+                if (msg.message.resUniqueId === reqUniqueId) {
+                    if (msg.message.resCode == 0) {
+                        const decoder = Container.getInterface("IGameFramework.ISerializable")!;
+                        const data = decoder.decoder(msg.message.resBodyId, msg.message.resBody);
+                        return data as R;
+                    } else {
+                        logger.warn(`rpc error:${msg.message.resCode}`);
+                    }
                 }
+            } else {
+                this.removeListeners(`$${reqUniqueId}`);
             }
         } else {
             logger.warn(`room ${roomName} is not connected`);
@@ -150,8 +200,7 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
             logger.log(`reconnecting to rpc room,${this._address},count:${count}`);
 
             // 2秒后重连
-            const task = Container.get(TaskService)!;
-            await task.waitDealy(2000);
+            await setTimeoutAsync(2000);
             return await this._connect(count, room, joinData);
         }
     }
