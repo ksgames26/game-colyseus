@@ -6,11 +6,10 @@ import { EventDispatcher } from "db://game-framework/game-framework";
 import { S2C_Replay } from "../../../assets/scripts/protocol/req";
 import { EventOverview } from "./colyseus";
 
-export class Room implements IGameFramework.IDisposable {
+export class Room extends EventDispatcher<EventOverview> implements IGameFramework.IDisposable {
     private _disposed: boolean = false;
     private _name: string = "";
     private _inst!: Colyseus.Room;
-    private _dispatch: EventDispatcher<EventOverview> = null!;
 
     public get isDisposed(): boolean { return this._disposed; }
 
@@ -18,13 +17,13 @@ export class Room implements IGameFramework.IDisposable {
         if (this._disposed) return;
         this._disposed = true;
         this._inst.connection.close(4000, "close");
-        this._dispatch = null!;
     }
 
-    public constructor(name: string, inst: Colyseus.Room, dispatch: EventDispatcher<EventOverview>) {
+    public constructor(name: string, inst: Colyseus.Room) {
+        super();
+
         this._name = name;
         this._inst = inst;
-        this._dispatch = dispatch;
     }
 
     public get isOpen(): boolean {
@@ -45,12 +44,13 @@ export class Room implements IGameFramework.IDisposable {
 
     public listen(): this {
         const room = this._inst;
-        const dispatcher = this._dispatch;
+        const dispatcher = this;
 
         // 监听所有未知信息
         room.onMessage("*", (t, m) => {
             if (typeof t == "string") {
-                let msg = m;
+
+                // 优先解析S2C_MESSAGE
                 if (t == S2C_MESSAGE) {
                     DEBUG && assert(m instanceof Uint8Array, "s2cmsg must be ArrayBuffer");
 
@@ -67,6 +67,16 @@ export class Room implements IGameFramework.IDisposable {
                     m = s2c;
                 }
 
+                // 其次解析自定义信息
+                if (dispatcher.has(t)) {
+                    dispatcher.dispatch(t, {
+                        room: this,
+                        message: m
+                    });
+                    return;
+                }
+
+                // 最后解析未知信息
                 if (dispatcher.has("onMessage")) {
                     const message = {
                         room: this,
@@ -78,6 +88,8 @@ export class Room implements IGameFramework.IDisposable {
                 }
             }
 
+            // 如果上面3个解析都不匹配，只能打印一个日志看看到底是什么信息
+            // 这个信息是no handled message
             logger.log(`${this._name} match all message: *`, t, m);
         });
 

@@ -2,8 +2,7 @@ import { assert } from "cc";
 import { DEBUG } from "cc/env";
 import type * as Colyseus from "colyseus.js";
 import { C2S_MESSAGE, Container, logger, setTimeoutAsync } from "db://game-core/game-framework";
-import { EventDispatcher } from "db://game-framework/game-framework";
-import { colyseus, EventOverview } from "./colyseus";
+import { colyseus } from "./colyseus";
 import { Room } from "./room";
 
 export interface IPlayer {
@@ -24,10 +23,9 @@ export interface IRoomState {
  *
  * @export
  * @class ColyseusSdk
- * @extends {EventDispatcher<EventOverview>}
  * @implements {IGameFramework.ISingleton}
  */
-export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGameFramework.IDisposable {
+export class ColyseusSdk implements IGameFramework.IDisposable {
     private _hostname = "localhost";
     private _port = 2567;
     private _useSSL = false;
@@ -76,12 +74,41 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
     }
 
     public async connect<T>(room: string, joinData: T): Promise<boolean> {
-        if (this._disposed || this._client) return false;
+        if (this._disposed) return false;
+        if (this._client && this._rooms.has(room)) return true;
+        if (this._client && !this._rooms.has(room)) {
+            return this.jointRoom(room, joinData);
+        }
 
         this._client = new colyseus.Client(this._address);
         const inst = await this._connect(3, room, joinData);
         if (inst) {
-            this._rooms.set(room, new Room(room, inst, this).listen());
+            this._rooms.set(room, new Room(room, inst).listen());
+            return true;
+        }
+
+        return false;
+    }
+
+    public async jointRoom<T>(room: string, joinData: T): Promise<boolean> {
+        if (!this._client) {
+            return this.connect(room, joinData);
+        }
+        if (this._disposed) return false;
+
+        const exist = this._rooms.get(room);
+        if (exist) {
+            if (exist.isOpen) {
+                return true;
+            } else {
+                logger.warn("删除已经断开链接的旧房间");
+                this._rooms.delete(room);
+            }
+        }
+
+        const inst = await this._connect(3, room, joinData);
+        if (inst) {
+            this._rooms.set(room, new Room(room, inst).listen());
             return true;
         } else {
             this._client = null!;
@@ -157,7 +184,7 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
             room.send(type, data);
             let timeId: NodeJS.Timeout = null!;
             let timeoutPromise = new Promise<void>((resolve) => { timeId = setTimeout(resolve, timeout); });
-            const msg = await Promise.race([timeoutPromise, this.addAsyncListener(`$${reqUniqueId}`)]);
+            const msg = await Promise.race([timeoutPromise, room.addAsyncListener(`$${reqUniqueId}`)]);
 
             // 不管有没有收到服务器消息，都要清除定时器
             timeId != null && clearTimeout(timeId);
@@ -174,7 +201,7 @@ export class ColyseusSdk extends EventDispatcher<EventOverview> implements IGame
                     }
                 }
             } else {
-                this.removeListeners(`$${reqUniqueId}`);
+                room.removeListeners(`$${reqUniqueId}`);
             }
         } else {
             logger.warn(`room ${roomName} is not connected`);

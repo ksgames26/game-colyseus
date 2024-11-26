@@ -23,6 +23,7 @@ export interface S2C_Replay {
 }
 
 export interface EventOverview {
+    [key:string]: { room: Room,  message: any },
     [key: `$${number}`]: { room: Room,  message: S2C_Replay },
     "onLeave": { room: Room, code: number, message: string | undefined },
     "onError": { room: Room, code: number, message: string | undefined },
