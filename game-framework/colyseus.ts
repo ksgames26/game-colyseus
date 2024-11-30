@@ -8,10 +8,10 @@ export interface S2C_Replay {
      * 响应唯一ID，与请求对应
      */
     resUniqueId: number;
-     /**
-     * 响应ID
-     */
-     resBodyId: number;
+    /**
+    * 响应ID
+    */
+    resBodyId: number;
     /**
      * 响应内容
      */
@@ -23,8 +23,8 @@ export interface S2C_Replay {
 }
 
 export interface EventOverview {
-    [key:string]: { room: Room,  message: any },
-    [key: `$${number}`]: { room: Room,  message: S2C_Replay },
+    [key: string]: { room: Room, message: any },
+    [key: `$${number}`]: { room: Room, reply: S2C_Replay, message: any },
     "onLeave": { room: Room, code: number, message: string | undefined },
     "onError": { room: Room, code: number, message: string | undefined },
     "onMessage": { room: Room, type: string, message: string | ArrayBuffer | S2C_Replay },
