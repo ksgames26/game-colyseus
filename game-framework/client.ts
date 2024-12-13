@@ -77,7 +77,7 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
         if (this._disposed) return false;
         if (this._client && this._rooms.has(room)) return true;
         if (this._client && !this._rooms.has(room)) {
-            return this.jointRoom(room, joinData, ctor);
+            return this.joinRoom(room, joinData, ctor);
         }
 
         this._client = new colyseus.Client(this._address);
@@ -85,16 +85,16 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
         if (inst) {
             let impl = ctor ?? Room;
 
-            this._rooms.set(room, new impl(room, inst).listen());
+            this._rooms.set(room, new impl(room, inst).listen(this));
             return true;
         }
 
         return false;
     }
 
-    public async jointRoom<T, R extends Room>(room: string, joinData: T, ctor?: IGameFramework.Constructor<R>): Promise<boolean> {
+    public async joinRoom<T, R extends Room>(room: string, joinData: T, ctor?: IGameFramework.Constructor<R>): Promise<boolean> {
         if (!this._client) {
-            return this.connect(room, joinData);
+            return this.connect(room, joinData, ctor);
         }
         if (this._disposed) return false;
 
@@ -111,7 +111,7 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
         const inst = await this._connect(3, room, joinData);
         if (inst) {
             let impl = ctor ?? Room;
-            this._rooms.set(room, new impl(room, inst).listen());
+            this._rooms.set(room, new impl(room, inst).listen(this));
             return true;
         } else {
             this._client = null!;
@@ -200,7 +200,7 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
 
     private async _connect<T>(count: number, room: string, joinData: T): Promise<IGameFramework.Nullable<Colyseus.Room>> {
         try {
-            const inst = await this._client.join(room, joinData);
+            const inst = await this._client.joinOrCreate(room, joinData);
             return inst;
         } catch (error) {
             if (this._disposed) return null;

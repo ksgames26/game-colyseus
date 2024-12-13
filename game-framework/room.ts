@@ -5,13 +5,19 @@ import { Container, logger, S2C_MESSAGE } from "db://game-core/game-framework";
 import { EventDispatcher } from "db://game-framework/game-framework";
 import { S2C_Replay } from "../../../assets/scripts/protocol/req";
 import { EventOverview } from "./colyseus";
+import { ColyseusSdk } from "./client";
 
 export class Room extends EventDispatcher<EventOverview> implements IGameFramework.IDisposable {
     private _disposed: boolean = false;
     private _name: string = "";
     private _inst!: Colyseus.Room;
+    private _sdk!: ColyseusSdk;
 
     public get isDisposed(): boolean { return this._disposed; }
+
+    public get reqUniqueId() {
+        return this._sdk.reqUniqueId;
+    }
 
     public dispose(): void {
         if (this._disposed) return;
@@ -35,14 +41,21 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
         if (!this._inst) {
             logger.warn(`${this._name} can not send message, because it is closed.`);
         }
-        this._inst.send(type, message);
+
+        if (message instanceof Uint8Array || message instanceof ArrayBuffer) {
+            this._inst.sendBytes(type, message);
+        } else {
+            this._inst.send(type, message);
+        }
     }
 
     public cast<T>(): Colyseus.Room<T> {
         return this._inst as Colyseus.Room<T>;
     }
 
-    public listen(): this {
+    public listen(sdk: ColyseusSdk): this {
+        this._sdk = sdk;
+
         const room = this._inst;
         const dispatcher = this;
 
@@ -80,7 +93,7 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
                     }
 
                     // 直接调用房间实现上的函数
-                    const fn = dispatcher[s2c.resUniqueId as keyof this] as (message: S2C_Replay, data: unknown) => void;
+                    const fn = dispatcher[s2c.resBodyId as keyof this] as (message: S2C_Replay, data: unknown) => void;
                     if (fn) {
                         fn.call(dispatcher, s2c, unpack);
                         return;
