@@ -8,9 +8,9 @@ import { EventOverview } from "./colyseus";
 import { ColyseusSdk } from "./client";
 
 export class Room extends EventDispatcher<EventOverview> implements IGameFramework.IDisposable {
+    protected _inst!: Colyseus.Room;
     private _disposed: boolean = false;
     private _name: string = "";
-    private _inst!: Colyseus.Room;
     private _sdk!: ColyseusSdk;
 
     public get isDisposed(): boolean { return this._disposed; }
@@ -30,6 +30,10 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
 
         this._name = name;
         this._inst = inst;
+    }
+
+    public onInit(): void {
+       
     }
 
     public get isOpen(): boolean {
@@ -54,6 +58,8 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
     }
 
     public listen(sdk: ColyseusSdk): this {
+        this.onInit();
+
         this._sdk = sdk;
 
         const room = this._inst;
