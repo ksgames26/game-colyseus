@@ -1,19 +1,66 @@
 import { assert } from "cc";
 import { DEBUG } from "cc/env";
 import type * as Colyseus from "colyseus.js";
-import { Container, logger, S2C_MESSAGE } from "db://game-core/game-framework";
+import { logger, S2C_MESSAGE } from "db://game-core/game-framework";
 import { EventDispatcher } from "db://game-framework/game-framework";
-import { S2C_Replay } from "../../../assets/scripts/protocol/req";
-import { EventOverview } from "./colyseus";
 import { ColyseusSdk } from "./client";
+import { EventOverview } from "./colyseus";
 
 export class Room extends EventDispatcher<EventOverview> implements IGameFramework.IDisposable {
     protected _inst!: Colyseus.Room;
+    protected _name: string = "";
     private _disposed: boolean = false;
-    private _name: string = "";
     private _sdk!: ColyseusSdk;
 
     public get isDisposed(): boolean { return this._disposed; }
+
+    /**
+     * 注入自己的消息解码
+     * 
+     * 解码S2C_MESSAGE
+     * 
+     * ```ts
+     * let s2c: S2C_Replay;
+     * try {
+     *     s2c = S2C_Replay.fromBinary(m);
+     * } catch (error) {
+     *     logger.error(`${this._name} can not parse S2C_MESSAGE, because it is invalid.`, m);
+     *     return;
+     * }
+     *
+     * let unpack: unknown = null;
+     * if (s2c.resCode == 0) {
+     *     const decoder = Container.getInterface("IGameFramework.ISerializable")!;
+     *     DEBUG && assert(!!decoder, "IGameFramework.ISerializable not found.");
+     *
+     *     unpack = decoder.decoder(s2c.resBodyId, s2c.resBody);
+     *
+     * }
+     *
+     * if (this.has(`$${s2c.resUniqueId}`)) {
+     *     this.dispatch(`$${s2c.resUniqueId}`, {
+     *         room: this,
+     *         reply: s2c,
+     *         message: unpack
+     *     });
+     *     return;
+     * }
+     *
+     * // 直接调用房间实现上的函数
+     * const fn = this[s2c.resBodyId as keyof this] as (message: S2C_Replay, data: unknown) => void;
+     * if (fn) {
+     *     fn.call(this, s2c, unpack);
+     *     return;
+     * }
+     *
+     * if (s2c) {
+     *     return s2c;
+     * }
+     * ```
+     *
+     * @memberof Room
+     */
+    public decoderS2CMessageHandle: (t: typeof S2C_MESSAGE, m: Uint8Array) => void = null!;
 
     public get reqUniqueId() {
         return this._sdk.reqUniqueId;
@@ -33,7 +80,7 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
     }
 
     public onInit(): void {
-       
+
     }
 
     public get isOpen(): boolean {
@@ -72,40 +119,9 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
                 if (t == S2C_MESSAGE || m instanceof Uint8Array) {
                     DEBUG && assert(m instanceof Uint8Array, "s2cmsg must be ArrayBuffer");
 
-                    let s2c: S2C_Replay;
-                    try {
-                        s2c = S2C_Replay.fromBinary(m);
-                    } catch (error) {
-                        logger.error(`${this._name} can not parse S2C_MESSAGE, because it is invalid.`, m);
-                        return;
+                    if (dispatcher.decoderS2CMessageHandle) {
+                        m = dispatcher.decoderS2CMessageHandle(t as typeof S2C_MESSAGE, m) ?? m;
                     }
-
-                    let unpack: unknown = null;
-                    if (s2c.resCode == 0) {
-                        const decoder = Container.getInterface("IGameFramework.ISerializable")!;
-                        DEBUG && assert(!!decoder, "IGameFramework.ISerializable not found.");
-
-                        unpack = decoder.decoder(s2c.resBodyId, s2c.resBody);
-
-                    }
-
-                    if (dispatcher.has(`$${s2c.resUniqueId}`)) {
-                        dispatcher.dispatch(`$${s2c.resUniqueId}`, {
-                            room: this,
-                            reply: s2c,
-                            message: unpack
-                        });
-                        return;
-                    }
-
-                    // 直接调用房间实现上的函数
-                    const fn = dispatcher[s2c.resBodyId as keyof this] as (message: S2C_Replay, data: unknown) => void;
-                    if (fn) {
-                        fn.call(dispatcher, s2c, unpack);
-                        return;
-                    }
-
-                    m = s2c;
                 }
 
                 // 直接调用房间实现上的函数
