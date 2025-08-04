@@ -4,13 +4,21 @@ import type * as Colyseus from "colyseus.js";
 import { logger, S2C_MESSAGE } from "db://game-core/game-framework";
 import { EventDispatcher } from "db://game-framework/game-framework";
 import { ColyseusSdk } from "./client";
-import { EventOverview } from "./colyseus";
+import { EventOverview, S2C_Replay } from "./colyseus";
 
 export class Room extends EventDispatcher<EventOverview> implements IGameFramework.IDisposable {
     protected _inst!: Colyseus.Room;
     protected _name: string = "";
     private _disposed: boolean = false;
     private _sdk!: ColyseusSdk;
+
+    public get name(): string {
+        return this._inst?.name ?? this._name;
+    }
+
+    public get roomId(): string {
+        return this._inst?.roomId ?? "";
+    }
 
     public get isDisposed(): boolean { return this._disposed; }
 
@@ -27,14 +35,11 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
      *     logger.error(`${this._name} can not parse S2C_MESSAGE, because it is invalid.`, m);
      *     return;
      * }
-     *
+     * 
      * let unpack: unknown = null;
      * if (s2c.resCode == 0) {
-     *     const decoder = Container.getInterface("IGameFramework.ISerializable")!;
      *     DEBUG && assert(!!decoder, "IGameFramework.ISerializable not found.");
-     *
      *     unpack = decoder.decoder(s2c.resBodyId, s2c.resBody);
-     *
      * }
      *
      * if (this.has(`$${s2c.resUniqueId}`)) {
@@ -46,10 +51,12 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
      *     return;
      * }
      *
-     * // 直接调用房间实现上的函数
-     * const fn = this[s2c.resBodyId as keyof this] as (message: S2C_Replay, data: unknown) => void;
+     * const fn = this![s2c.resBodyId as keyof ThisType<Room>] as (message: S2C_Replay, data: unknown) => void;
      * if (fn) {
      *     fn.call(this, s2c, unpack);
+     *     return;
+     * } else {
+     *     this.dispatch(String(s2c.resBodyId), unpack);
      *     return;
      * }
      *
@@ -60,7 +67,7 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
      *
      * @memberof Room
      */
-    public decoderS2CMessageHandle: (t: typeof S2C_MESSAGE, m: Uint8Array) => void = null!;
+    public static decoderS2CMessageHandle: (t: typeof S2C_MESSAGE, m: Uint8Array) => void = null!;
 
     public get reqUniqueId() {
         return this._sdk.reqUniqueId;
@@ -79,6 +86,10 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
         this._inst = inst;
     }
 
+    public applyMessage(replay: S2C_Replay, message: unknown): void {
+
+    }
+
     public onInit(): void {
 
     }
@@ -93,7 +104,7 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
             logger.warn(`${this._name} can not send message, because it is closed.`);
         }
 
-        if (message instanceof Uint8Array || message instanceof ArrayBuffer) {
+        if (message instanceof Uint8Array) {
             this._inst.sendBytes(type, message);
         } else {
             this._inst.send(type, message);
@@ -119,8 +130,9 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
                 if (t == S2C_MESSAGE || m instanceof Uint8Array) {
                     DEBUG && assert(m instanceof Uint8Array, "s2cmsg must be ArrayBuffer");
 
-                    if (dispatcher.decoderS2CMessageHandle) {
-                        m = dispatcher.decoderS2CMessageHandle(t as typeof S2C_MESSAGE, m) ?? m;
+                    if (Room.decoderS2CMessageHandle) {
+                        m = Room.decoderS2CMessageHandle?.call(this, t as typeof S2C_MESSAGE, m) ?? m;
+                        return;
                     }
                 }
 

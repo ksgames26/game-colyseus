@@ -29,12 +29,14 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
     private _hostname = "localhost";
     private _port = 2567;
     private _useSSL = false;
+    private _url = "";
     private _address = "";
     private _reqUniqueId = 0;
 
     private _disposed = false;
     private _client!: Colyseus.Client;
-    private _rooms: Map<string, Room> = new Map();
+    private _room: IGameFramework.Nullable<Room> = null;
+    private _joinByID: boolean = false;
 
     public get reqUniqueId() {
         return this._reqUniqueId++;
@@ -48,87 +50,71 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
         if (this._disposed) return;
         this._disposed = true;
 
-        for (const [_, room] of this._rooms) {
-            room.dispose();
+        if (this._room) {
+            this._room.dispose();
+            this._room = null;
         }
-        this._rooms.clear();
+
         this._client = null!;
     }
 
-    public initialize(args: {
-        hostname: string,
-        port: number,
-        useSSL: boolean
-    }) {
+    public initialize(args: ({
+        hostname: string;
+        port: number;
+        url?: never;
+    } | {
+        hostname?: never;
+        port?: never;
+        url: string;
+    }) & { useSSL?: boolean }) {
 
         DEBUG && assert(!!args, "args is null");
-        DEBUG && assert(!!args.hostname, "args.hostname is null");
-        DEBUG && assert(!!args.port, "args.port is null");
-        DEBUG && assert(typeof args.port === "number", "args.port is not number");
 
-        this._hostname = args.hostname;
-        this._port = args.port;
-        this._useSSL = args.useSSL;
+        this._useSSL = args.useSSL ?? false;
 
-        this._address = `ws${this._useSSL ? "s" : ""}://${this._hostname}:${this._port}`;
-    }
+        if (args.url) {
+            this._url = args.url;
+            if (this._url.startsWith("ws://") || this._url.startsWith("wss://")) {
+                this._address = this._url;
+            } else {
+                this._address = `ws${this._useSSL ? "s" : ""}://${this._url}`;
+            }
+        } else {
+            DEBUG && assert(!!args.hostname, "args.hostname is null");
+            DEBUG && assert(!!args.port, "args.port is null");
+            DEBUG && assert(typeof args.port === "number", "args.port is not number");
 
-    public async connect<T, R extends Room>(room: string, joinData: T, ctor?: IGameFramework.Constructor<R>): Promise<boolean> {
-        if (this._disposed) return false;
-        if (this._client && this._rooms.has(room)) return true;
-        if (this._client && !this._rooms.has(room)) {
-            return this.joinRoom(room, joinData, ctor);
+            this._hostname = args.hostname!;
+            this._port = args.port!;
+            this._address = `ws${this._useSSL ? "s" : ""}://${this._hostname}:${this._port}`;
         }
 
-        this._client = new colyseus.Client(this._address);
-        const inst = await this._connect(3, room, joinData);
-        if (inst) {
-            let impl = ctor ?? Room;
-
-            this._rooms.set(room, new impl(room, inst).listen(this));
-            return true;
-        }
-
-        return false;
+        DEBUG && assert(!this._address.includes("null") && !this._address.includes("undefined"), "address is invalid");
     }
 
     public async joinRoom<T, R extends Room>(room: string, joinData: T, ctor?: IGameFramework.Constructor<R>): Promise<boolean> {
-        if (!this._client) {
-            return this.connect(room, joinData, ctor);
-        }
-        if (this._disposed) return false;
-
-        const exist = this._rooms.get(room);
-        if (exist) {
-            if (exist.isOpen) {
-                return true;
-            } else {
-                logger.warn("删除已经断开链接的旧房间");
-                this._rooms.delete(room);
-            }
-        }
-
-        const inst = await this._connect(3, room, joinData);
-        if (inst) {
-            let impl = ctor ?? Room;
-            this._rooms.set(room, new impl(room, inst).listen(this));
-            return true;
-        } else {
-            this._client = null!;
-        }
-
-        return false;
+        this._joinByID = false;
+        return await this.join(room, joinData, ctor);
     }
 
-    public async leaveRoom(name: string): Promise<boolean> {
+    public async jointRoomByID<T, R extends Room>(roomId: string, joinData: T, ctor?: IGameFramework.Constructor<R>): Promise<boolean> {
+        this._joinByID = true;
+        return await this.join(roomId, joinData, ctor);
+    }
+
+    public async leaveRoom(): Promise<boolean> {
         if (this._disposed) return false;
 
+        if (this._room) {
+            this._room.dispose();
+            this._room = null;
+        }
 
         return true;
     }
 
-    public getRoom(name: string): IGameFramework.Nullable<Room> {
-        return this._rooms.get(name);
+    public getRoom(): IGameFramework.Nullable<Room> {
+        return this._room;
     }
 
     /**
@@ -141,19 +127,19 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
      * @return {*}  {Promise<IGameFramework.Nullable<R>>}
      * @memberof ColyseusSdk
      */
-    public async rpcHasPushMessage<R extends object>(roomName: string, data: ArrayBuffer, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
+    public async rpcHasPushMessage<R extends object>(data: ArrayBuffer, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
         if (this._disposed) return null;
 
-        const room = this._rooms.get(roomName);
+        const room = this._room;
         if (!room) {
-            logger.warn(`room ${roomName} is not exist`);
+            logger.warn(`room is not exist`);
             return;
         }
 
         if (room.isOpen) {
             room.send(type, data);
         } else {
-            logger.warn(`room ${roomName} is not connected`);
+            logger.warn(`room ${room.name} is not connected`);
         }
     }
 
@@ -161,7 +147,6 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
      * 发送消息并等待服务器回复
      *
      * @template R
-     * @param {string} roomName
      * @param {number} reqUniqueId
      * @param {ArrayBuffer} data
      * @param {number} [timeout=20_000]
@@ -169,12 +154,12 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
      * @return {*}  {Promise<IGameFramework.Nullable<R>>}
      * @memberof ColyseusSdk
      */
-    public async rpcHasReplyMessage<R extends object>(roomName: string, reqUniqueId: number, data: ArrayBuffer, timeout: number = 20_000, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
+    public async rpcHasReplyMessage<R extends object>(reqUniqueId: number, data: ArrayBuffer, timeout: number = 20_000, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
         if (this._disposed) return null;
 
-        const room = this._rooms.get(roomName);
+        const room = this._room;
         if (!room) {
-            logger.warn(`room ${roomName} is not exist`);
+            logger.warn(`room is not exist`);
             return;
         }
 
@@ -194,13 +179,51 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
                 room.removeListeners(`$${reqUniqueId}`);
             }
         } else {
-            logger.warn(`room ${roomName} is not connected`);
+            logger.warn(`room ${room.name} is not connected`);
         }
     }
 
-    private async _connect<T>(count: number, room: string, joinData: T): Promise<IGameFramework.Nullable<Colyseus.Room>> {
+    private async join<T, R extends Room>(roomNameOrID: string, joinData: T, ctor?: IGameFramework.Constructor<R>): Promise<boolean> {
+        if (!this._client) {
+            this._client = new colyseus.Client(this._address);
+        }
+        if (this._disposed) return false;
+
+        const exist = this._room;
+        if (exist) {
+            if (exist.isOpen) {
+                return true;
+            } else {
+                logger.warn("删除已经断开链接的旧房间");
+
+                exist.dispose();
+                this._room = null;
+            }
+        }
+
+        const inst = await this._connect(3, roomNameOrID, joinData);
+        if (inst) {
+            let impl = ctor ?? Room;
+            this._room = new impl(roomNameOrID, inst).listen(this);
+            return true;
+        } else {
+            logger.warn(`连接到房间 ${roomNameOrID} 失败`);
+            this._room = null;
+            this._client = null!;
+        }
+
+        return false;
+    }
+
+    private async _connect<T>(count: number, roomNameOrID: string, joinData: T): Promise<IGameFramework.Nullable<Colyseus.Room>> {
         try {
-            const inst = await this._client.joinOrCreate(room, joinData);
+
+            let inst: Colyseus.Room | null = null;
+            if (this._joinByID) {
+                inst = await this._client.joinById(roomNameOrID, joinData);
+            } else {
+                inst = await this._client.joinOrCreate(roomNameOrID, joinData);
+            }
             return inst;
         } catch (error) {
             if (this._disposed) return null;
@@ -218,7 +241,7 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
 
             // 2秒后重连
             await setTimeoutAsync(2000);
-            return await this._connect(count, room, joinData);
+            return await this._connect(count, roomNameOrID, joinData);
         }
     }
 }
