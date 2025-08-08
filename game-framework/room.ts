@@ -1,6 +1,5 @@
 import { assert } from "cc";
 import { DEBUG } from "cc/env";
-import type * as Colyseus from "colyseus.js";
 import { logger, S2C_MESSAGE } from "db://game-core/game-framework";
 import { EventDispatcher } from "db://game-framework/game-framework";
 import { ColyseusSdk } from "./client";
@@ -143,9 +142,11 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
                     return;
                 }
 
+                const tEvent = t as string;
+
                 // 其次解析自定义信息
-                if (dispatcher.has(t as string)) {
-                    dispatcher.dispatch(t as string, {
+                if (dispatcher.has(tEvent)) {
+                    dispatcher.dispatch(tEvent, {
                         room: this,
                         message: m
                     });
@@ -156,10 +157,10 @@ export class Room extends EventDispatcher<EventOverview> implements IGameFramewo
                 if (dispatcher.has("onMessage")) {
                     const message = {
                         room: this,
-                        type: t,
+                        type: tEvent,
                         message: m
                     };
-                    dispatcher.dispatch("onMessage", message as any);
+                    dispatcher.dispatch("onMessage", message);
                     return;
                 }
             }

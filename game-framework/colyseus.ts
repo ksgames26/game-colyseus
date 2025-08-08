@@ -1,7 +1,5 @@
-//@ts-ignore 
-import ColyseusImpl from "../node_modules/colyseus.js/dist/colyseus-cocos-creator.js";
+import * as ColyseusImpl from "./colyseus-cocos-creator.js";
 import { Room } from "./room.js";
-const colyseus: typeof import("colyseus.js") = ColyseusImpl;
 
 export interface S2C_Replay {
     /**
@@ -23,11 +21,13 @@ export interface S2C_Replay {
 }
 
 export interface EventOverview {
-    [key: string]: { room: Room, message: any },
+    [key: string]: { room: Room, message: any } | any,
     [key: `$${number}`]: { room: Room, reply: S2C_Replay, message: any },
     "onLeave": { room: Room, code: number, message: string | undefined },
     "onError": { room: Room, code: number, message: string | undefined },
     "onMessage": { room: Room, type: string, message: string | ArrayBuffer | S2C_Replay },
 }
 
-export { colyseus };
+//@ts-ignore
+const defaults = ColyseusImpl.default as typeof ColyseusImpl;
+export { defaults as colyseus};

@@ -1,6 +1,5 @@
 import { assert } from "cc";
 import { DEBUG } from "cc/env";
-import type * as Colyseus from "colyseus.js";
 import { C2S_MESSAGE, logger, setTimeoutAsync } from "db://game-core/game-framework";
 import { colyseus } from "./colyseus";
 import { Room } from "./room";
