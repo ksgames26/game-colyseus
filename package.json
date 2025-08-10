@@ -16,6 +16,10 @@
         "@types/node": "^18.17.1",
         "typescript": "^4.3.4"
     },
+    "gameDependencies": {
+        "game-core": "v1.0.0",
+        "game-framework": "v1.0.0"
+    },
     "contributions": {
         "asset-db": {
             "mount": {
