@@ -18,7 +18,7 @@
     },
     "gameDependencies": {
         "game-core": "v1.0.0",
-        "game-framework": "v1.0.1"
+        "game-framework": "v1.0.2"
     },
     "contributions": {
         "asset-db": {
