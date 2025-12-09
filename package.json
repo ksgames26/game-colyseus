@@ -17,8 +17,8 @@
         "typescript": "^4.3.4"
     },
     "gameDependencies": {
-        "game-core": "v1.0.1",
-        "game-framework": "v1.0.2"
+        "game-core": "v1.0.2",
+        "game-framework": "v1.0.3"
     },
     "contributions": {
         "asset-db": {

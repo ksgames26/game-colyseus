@@ -1,7 +1,7 @@
 import { assert } from "cc";
 import { DEBUG } from "cc/env";
-import { C2S_MESSAGE, logger, setTimeoutAsync } from "db://game-core/game-framework";
-import { colyseus } from "./colyseus";
+import { C2S_MESSAGE, Container, getLogger, setTimeoutAsync } from "db://game-core/game-framework";
+import { C2S_Request, colyseus } from "./colyseus";
 import { Room } from "./room";
 
 export interface IPlayer {
@@ -12,6 +12,8 @@ export interface IRoomState {
     players: Map<string, IPlayer>;
 }
 
+
+const logger = getLogger("网络");
 
 /**
  * Colyseus SDK
@@ -126,7 +128,7 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
      * @return {*}  {Promise<IGameFramework.Nullable<R>>}
      * @memberof ColyseusSdk
      */
-    public async rpcHasPushMessage<R extends object>(data: ArrayBuffer, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
+    public async rpcHasPushMessage<R extends object>(data: Uint8Array<ArrayBufferLike>, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<R>> {
         if (this._disposed) return null;
 
         const room = this._room;
@@ -164,6 +166,7 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
 
         if (room.isOpen) {
             room.send(type, data);
+
             let timeId: NodeJS.Timeout = null!;
             let timeoutPromise = new Promise<void>((resolve) => { timeId = setTimeout(resolve, timeout); });
             const msg = await Promise.race([timeoutPromise, room.addAsyncListener(`$${reqUniqueId}`)]);
@@ -175,6 +178,116 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
                 // 事件发送后会自动remove。所以这里不需要手动remove
                 return msg.message as R;
             } else {
+                room.removeListeners(`$${reqUniqueId}`);
+            }
+        } else {
+            logger.warn(`room ${room.name} is not connected`);
+        }
+    }
+
+    /**
+     * 推送消息，而不管回復
+     *
+     * @template R
+     * @param {R} message
+     * @param {number} id
+     * @param {string} [type=C2S_MESSAGE]
+     * @return {*}  {Promise<void>}
+     * @memberof ColyseusSdk
+     */
+    public async pushMessage<R extends IGameFramework.ISerializer>(message: R, id: number, type: string = C2S_MESSAGE): Promise<void> {
+        if (this._disposed) return;
+
+        const room = this._room;
+        if (!room) {
+            logger.warn(`room is not exist`);
+            return;
+        }
+
+        const reqUniqueId = this.reqUniqueId;
+        const reqBodyId = id;
+
+        const serializable = Container.getInterface("IGameFramework.ISerializable");
+        const req = serializable?.createByName<C2S_Request & IGameFramework.ISerializer>("C2S_Request");
+        if (!req) {
+            logger.warn(`C2S_Request is not registered`);
+            return;
+        }
+
+        req.reqUniqueId = reqUniqueId;
+        req.reqBodyId = reqBodyId;
+        req.reqBody = serializable?.encoder(message)!;
+
+        const buffer = serializable?.encoder(req);
+
+        if (!buffer) {
+            logger.warn(`encode C2S_Request failed`);
+            return;
+        }
+
+        if (room.isOpen) {
+            room.send(type, buffer);
+        } else {
+            logger.warn(`room ${room.name} is not connected`);
+        }
+    }
+
+    /**
+     * 给服务器发送消息, 消息有返回, 也就是一问一答的消息
+     *
+     * @template R
+     * @param {R} message 
+     * const serializable = Container.getInterface("IGameFramework.ISerializable");
+     * 
+     * const message = serializable!.create(protoId);
+     * 
+     * @param {number} [timeout=20_000]
+     * @param {string} [type=C2S_MESSAGE]
+     * @return {*}  {Promise<IGameFramework.Nullable<R>>}
+     * @memberof ColyseusSdk
+     */
+    public async sendMessage<R extends IGameFramework.ISerializer, S extends object>(message: R, timeout: number = 20_000, type: string = C2S_MESSAGE): Promise<IGameFramework.Nullable<S>> {
+        if (this._disposed) return null;
+
+        const room = this._room;
+        if (!room) {
+            logger.warn(`room is not exist`);
+            return;
+        }
+
+        const reqUniqueId = this.reqUniqueId;
+
+        const serializable = Container.getInterface("IGameFramework.ISerializable");
+        const req = serializable?.createByName<C2S_Request & IGameFramework.ISerializer>("C2S_Request");
+        if (!req) {
+            logger.warn(`C2S_Request is not registered`);
+            return null;
+        }
+
+        req.reqUniqueId = reqUniqueId;
+        req.reqBodyId = message.protoId as number;
+        req.reqBody = serializable?.encoder(message)!;
+        const name = serializable?.getNameById(req.reqBodyId);
+
+        const buffer = serializable?.encoder(req);
+
+        if (room.isOpen) {
+            room.send(type, buffer);
+            DEBUG && logger.info(`⬆️⬇️ message to server, messageName: ${name}, reqUniqueId: ${reqUniqueId}`);
+
+            let timeId: NodeJS.Timeout = null!;
+            let timeoutPromise = new Promise<void>((resolve) => { timeId = setTimeout(resolve, timeout); });
+            const msg = await Promise.race([timeoutPromise, room.addAsyncListener(`$${reqUniqueId}`)]);
+
+            // 不管有没有收到服务器消息，都要清除定时器
+            timeId != null && clearTimeout(timeId);
+
+            if (msg) {
+                DEBUG && logger.info(`⬇️ message reply, messageName: ${name}, reqUniqueId: ${reqUniqueId}`);
+                // 事件发送后会自动remove。所以这里不需要手动remove
+                return msg.message as S;
+            } else {
+                DEBUG && logger.warn(`⌛️ message timeout, messageName: ${name}, reqUniqueId: ${reqUniqueId}`);
                 room.removeListeners(`$${reqUniqueId}`);
             }
         } else {
@@ -236,7 +349,7 @@ export class ColyseusSdk implements IGameFramework.IDisposable {
                 return null;
             }
 
-            logger.log(`reconnecting to rpc room,${this._address},count:${count}`);
+            logger.info(`reconnecting to rpc room,${this._address},count:${count}`);
 
             // 2秒后重连
             await setTimeoutAsync(2000);

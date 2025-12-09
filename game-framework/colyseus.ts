@@ -20,6 +20,21 @@ export interface S2C_Replay {
     resCode: number;
 }
 
+export interface C2S_Request {
+    /**
+     * 请求唯一ID
+     */
+    reqUniqueId: number;
+    /**
+     * 请求ID
+     */
+    reqBodyId: number;
+    /**
+     * 请求内容
+     */
+    reqBody: Uint8Array;
+}
+
 export interface EventOverview {
     [key: string]: { room: Room, message: any } | any,
     [key: `$${number}`]: { room: Room, reply: S2C_Replay, message: any },
